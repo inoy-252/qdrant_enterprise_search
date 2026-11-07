@@ -1,4 +1,6 @@
-import os 
+import os
+import time
+import uuid
 
 from dotenv import load_dotenv
 from google import genai
@@ -44,9 +46,35 @@ class QdrantSemanticCache:
             )
 
     def _get_embedding(self, text: str) -> list[float]:
-        """Generates a 768-dimensional dense vector using Gemini."""
+        """Generates a 768-dimensional dense vector using Gemini with MRL truncation."""
         response = self._genai_client.models.embed_content(
             model="gemini-embedding-001",
             contents=text,
+            config={"output_dimensionality": self.vector_size},
         )
         return response.embeddings[0].values
+
+    def store(self, query: str, response: str, metadata: dict | None = None) -> str:
+        """Embeds and saves a query-response pair as a vector point in Qdrant."""
+        vector = self._get_embedding(query)
+        point_id = str(uuid.uuid4())
+
+        payload = {
+            "query": query,
+            "response": response,
+            "created_at": time.time(),
+        }
+        if metadata:
+            payload.update(metadata)
+
+        point = models.PointStruct(
+            id=point_id,
+            vector=vector,
+            payload=payload,
+        )
+
+        self.client.upsert(
+            collection_name=self.collection_name,
+            points=[point],
+        )
+        return point_id
