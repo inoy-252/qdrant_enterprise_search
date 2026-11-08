@@ -78,3 +78,33 @@ class QdrantSemanticCache:
             points=[point],
         )
         return point_id
+
+    def lookup(self, query: str) -> dict | None:
+        """
+        Performs vector similarity search against cached points.
+        Returns the closest matching cached response if similarity >= threshold, else None.
+        """
+        query_vector = self._get_embedding(query)
+
+        results = self.client.query_points(
+            collection_name=self.collection_name,
+            query=query_vector,
+            limit=1,
+            score_threshold=self.threshold,
+        )
+
+        if results.points:
+            hit = results.points[0]
+            return {
+                "id": hit.id,
+                "query": hit.payload.get("query"),
+                "response": hit.payload.get("response"),
+                "similarity": round(float(hit.score), 4),
+                "metadata": {
+                    k: v
+                    for k, v in hit.payload.items()
+                    if k not in ("query", "response")
+                },
+            }
+
+        return None
