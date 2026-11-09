@@ -5,33 +5,35 @@ import uuid
 from dotenv import load_dotenv
 from google import genai
 from qdrant_client import QdrantClient
-from qdrant_client.http import models 
+from qdrant_client.http import models
 
 load_dotenv()
+
 
 class QdrantSemanticCache:
     """
     Semantic caching and vector retrieval engine using Qdrant.
     Uses Google Gemini embeddings and HNSW graph indexing for sub-millisecond search.
     """
+
     def __init__(
         self,
         collection_name: str = "semantic_cache",
         db_path: str = "./qdrant_storage",
         threshold: float = 0.90,
-        vector_size: int  = 768,
+        vector_size: int = 768,
     ):
         self.collection_name = collection_name
         self.db_path = db_path
         self.threshold = threshold
-        self.vector_size = vector_size 
+        self.vector_size = vector_size
         self.client = QdrantClient(path=self.db_path)
-        
+
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY not found in environment or .env file.")
         self._genai_client = genai.Client(api_key=api_key)
-        
+
         self._init_db()
 
     def _init_db(self):
@@ -52,6 +54,8 @@ class QdrantSemanticCache:
             contents=text,
             config={"output_dimensionality": self.vector_size},
         )
+        if not response.embeddings or not response.embeddings[0].values:
+            raise ValueError("Gemini API failed to return embedding vectors.")
         return response.embeddings[0].values
 
     def store(self, query: str, response: str, metadata: dict | None = None) -> str:
@@ -65,7 +69,11 @@ class QdrantSemanticCache:
             "created_at": time.time(),
         }
         if metadata:
-            payload.update(metadata)
+            clean_metadata = {
+                k: (v.strip().lower() if isinstance(v, str) else v)
+                for k, v in metadata.items()
+            }
+            payload.update(clean_metadata)
 
         point = models.PointStruct(
             id=point_id,
@@ -79,32 +87,57 @@ class QdrantSemanticCache:
         )
         return point_id
 
-    def lookup(self, query: str) -> dict | None:
+    def lookup(
+        self,
+        query: str,
+        filter_metadata: dict | None = None,
+    ) -> dict | None:
         """
         Performs vector similarity search against cached points.
         Returns the closest matching cached response if similarity >= threshold, else None.
         """
         query_vector = self._get_embedding(query)
 
+        query_filter = None
+        if filter_metadata:
+            conditions: list[models.Condition] = [
+                models.FieldCondition(
+                    key=k,
+                    match=models.MatchValue(value=v.strip().lower() if isinstance(v, str) else v),
+                )
+                for k, v in filter_metadata.items()
+            ]
+            query_filter = models.Filter(must=conditions)
+
         results = self.client.query_points(
             collection_name=self.collection_name,
             query=query_vector,
+            query_filter=query_filter,
             limit=1,
             score_threshold=self.threshold,
         )
 
         if results.points:
             hit = results.points[0]
+            payload = hit.payload or {}
             return {
                 "id": hit.id,
-                "query": hit.payload.get("query"),
-                "response": hit.payload.get("response"),
+                "query": payload.get("query"),
+                "response": payload.get("response"),
                 "similarity": round(float(hit.score), 4),
                 "metadata": {
-                    k: v
-                    for k, v in hit.payload.items()
-                    if k not in ("query", "response")
+                    k: v for k, v in payload.items() if k not in ("query", "response")
                 },
             }
-
         return None
+
+    def get_stats(self) -> dict:
+        """Returns real-time telemetry and collection health statistics."""
+        info = self.client.get_collection(collection_name=self.collection_name)
+        return {
+            "collection_name": self.collection_name,
+            "total_points": info.points_count,
+            "status": str(info.status),
+            "vector_size": self.vector_size,
+            "similarity_threshold": self.threshold,
+        }
