@@ -6,6 +6,8 @@ Phase 1: Lexical Sparse Vector Encoding and Dual-Vector Schema Definition
 
 import math
 import os
+import time
+import uuid
 import zlib
 from collections import Counter
 
@@ -106,3 +108,69 @@ class QdrantHybridEngine:
                     )
                 },
             )
+
+    def _get_dense_embedding(self, text: str) -> list[float]:
+        """Generates 768-dimensional dense vector using Gemini with MRL truncation."""
+        response = self._genai_client.models.embed_content(
+            model="gemini-embedding-001",
+            contents=text,
+            config={
+                "output_dimensionality": self.vector_size,
+                "task_type": "SEMANTIC_SIMILARITY",
+            },
+        )
+        if not response.embeddings or not response.embeddings[0].values:
+            raise ValueError("Gemini API failed to return dense embedding vectors.")
+        return response.embeddings[0].values
+
+    def index_document(
+        self,
+        title: str,
+        content: str,
+        doc_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> str:
+        """
+        Indexes an enterprise document with dual dense and sparse representations
+        in a single atomic transaction.
+        """
+        point_id = doc_id or str(uuid.uuid4())
+        full_text = f"{title}\n{content}"
+
+        dense_vector = self._get_dense_embedding(full_text)
+        sparse_vector = self.sparse_encoder.encode(full_text)
+
+        payload = {
+            "title": title,
+            "content": content,
+            "indexed_at": time.time(),
+        }
+        if metadata:
+            for k, v in metadata.items():
+                payload[k] = v.strip().lower() if isinstance(v, str) else v
+
+        self.client.upsert(
+            collection_name=self.collection_name,
+            points=[
+                models.PointStruct(
+                    id=point_id,
+                    vector={
+                        "dense": dense_vector,
+                        "sparse": sparse_vector,
+                    },
+                    payload=payload,
+                )
+            ],
+        )
+        return point_id
+
+    def get_telemetry(self) -> dict:
+        """Retrieves collection statistics, vector counts, and indexing status."""
+        info = self.client.get_collection(collection_name=self.collection_name)
+        return {
+            "collection": self.collection_name,
+            "total_points": info.points_count,
+            "status": info.status.name.lower() if info.status else "unknown",
+            "dense_vector_dim": self.vector_size,
+            "sparse_vectors_enabled": True,
+        }
