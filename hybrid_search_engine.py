@@ -232,6 +232,106 @@ class QdrantHybridEngine:
             )
         return results
 
+    def dense_search(
+        self,
+        query: str,
+        limit: int = 5,
+        filter_metadata: dict | None = None,
+    ) -> list[dict]:
+        """
+        Executes dense semantic search using 768-dimensional Gemini embeddings
+        over the HNSW vector index.
+        """
+        query_dense = self._get_dense_embedding(query)
+        query_filter = None
+        if filter_metadata:
+            conditions: list[models.Condition] = [
+                models.FieldCondition(
+                    key=k,
+                    match=models.MatchValue(
+                        value=v.strip().lower() if isinstance(v, str) else v
+                    ),
+                )
+                for k, v in filter_metadata.items()
+            ]
+            query_filter = models.Filter(must=conditions)
+
+        response = self.client.query_points(
+            collection_name=self.collection_name,
+            query=query_dense,
+            using="dense",
+            query_filter=query_filter,
+            limit=limit,
+        )
+
+        results = []
+        for point in response.points:
+            payload = point.payload or {}
+            results.append(
+                {
+                    "id": point.id,
+                    "score": round(point.score, 4),
+                    "title": payload.get("title", ""),
+                    "content": payload.get("content", ""),
+                    "metadata": {
+                        k: v
+                        for k, v in payload.items()
+                        if k not in ["title", "content", "indexed_at"]
+                    },
+                }
+            )
+        return results
+
+    def sparse_search(
+        self,
+        query: str,
+        limit: int = 5,
+        filter_metadata: dict | None = None,
+    ) -> list[dict]:
+        """
+        Executes sparse lexical search using BM25 token frequencies
+        over the inverted sparse index.
+        """
+        query_sparse = self.sparse_encoder.encode(query)
+        query_filter = None
+        if filter_metadata:
+            conditions: list[models.Condition] = [
+                models.FieldCondition(
+                    key=k,
+                    match=models.MatchValue(
+                        value=v.strip().lower() if isinstance(v, str) else v
+                    ),
+                )
+                for k, v in filter_metadata.items()
+            ]
+            query_filter = models.Filter(must=conditions)
+
+        response = self.client.query_points(
+            collection_name=self.collection_name,
+            query=query_sparse,
+            using="sparse",
+            query_filter=query_filter,
+            limit=limit,
+        )
+
+        results = []
+        for point in response.points:
+            payload = point.payload or {}
+            results.append(
+                {
+                    "id": point.id,
+                    "score": round(point.score, 4),
+                    "title": payload.get("title", ""),
+                    "content": payload.get("content", ""),
+                    "metadata": {
+                        k: v
+                        for k, v in payload.items()
+                        if k not in ["title", "content", "indexed_at"]
+                    },
+                }
+            )
+        return results
+
     def get_telemetry(self) -> dict:
         """Retrieves collection statistics, vector counts, and indexing status."""
         info = self.client.get_collection(collection_name=self.collection_name)
