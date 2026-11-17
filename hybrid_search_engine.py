@@ -164,6 +164,70 @@ class QdrantHybridEngine:
         )
         return point_id
 
+    def index_batch(
+        self,
+        documents: list[dict],
+    ) -> list[str]:
+        """
+        Batch indexes multiple documents with dual-vector representations
+        in a single atomic upsert operation.
+        Each document dict expects:
+            - 'title': str
+            - 'content': str
+            - 'id': str (optional)
+            - 'metadata': dict (optional)
+        """
+        if not documents:
+            return []
+
+        points: list[models.PointStruct] = []
+        point_ids: list[str] = []
+
+        for doc in documents:
+            title = doc.get("title", "")
+            content = doc.get("content", "")
+            point_id = doc.get("id") or str(uuid.uuid4())
+            full_text = f"{title}\n{content}".strip()
+
+            dense_vector = self._get_dense_embedding(full_text)
+            sparse_vector = self.sparse_encoder.encode(full_text)
+
+            payload = {
+                "title": title,
+                "content": content,
+                "indexed_at": time.time(),
+            }
+            metadata = doc.get("metadata")
+            if metadata and isinstance(metadata, dict):
+                for k, v in metadata.items():
+                    payload[k] = v.strip().lower() if isinstance(v, str) else v
+
+            points.append(
+                models.PointStruct(
+                    id=point_id,
+                    vector={
+                        "dense": dense_vector,
+                        "sparse": sparse_vector,
+                    },
+                    payload=payload,
+                )
+            )
+            point_ids.append(point_id)
+
+        self.client.upsert(
+            collection_name=self.collection_name,
+            points=points,
+        )
+        return point_ids
+
+    def delete_document(self, doc_id: str) -> bool:
+        """Deletes a document point from the dual-vector collection by ID."""
+        self.client.delete(
+            collection_name=self.collection_name,
+            points_selector=models.PointIdsList(points=[doc_id]),
+        )
+        return True
+
     def hybrid_search(
         self,
         query: str,
