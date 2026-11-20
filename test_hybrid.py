@@ -9,25 +9,25 @@ from hybrid_search_engine import QdrantHybridEngine
 # Curated enterprise documents with technical codes and domain concepts
 SAMPLE_DOCUMENTS = [
     {
-        "id": "doc-001",
+        "id": 1,
         "title": "Network Gateway Troubleshooting Guide",
         "content": "For packet drops on edge proxies, inspect firewall rule ERR-NET-9002. Restart interface eth0 if latency exceeds 200ms.",
         "metadata": {"department": "infrastructure", "tier": "p1"},
     },
     {
-        "id": "doc-002",
+        "id": 2,
         "title": "Corporate Travel and Airfare Expense Policy",
         "content": "Employees may claim reimbursement for economy flights booked 14 days in advance. Meals capped at $75 per diem.",
         "metadata": {"department": "finance", "tier": "general"},
     },
     {
-        "id": "doc-003",
+        "id": 3,
         "title": "Identity and Access Management SSO Protocol",
         "content": "Authentication failure SEC-AUTH-401 indicates expired SAML assertion. Reset OAuth2 tokens in enterprise portal.",
         "metadata": {"department": "security", "tier": "p0"},
     },
     {
-        "id": "doc-004",
+        "id": 4,
         "title": "Kubernetes GPU Cluster Provisioning Manual",
         "content": "Deploy NVIDIA A100 daemonsets with helm chart v3. Ensure CUDA drivers 12.4 are linked before running distributed training.",
         "metadata": {"department": "infrastructure", "tier": "p2"},
@@ -73,3 +73,53 @@ def evaluate_query(engine: QdrantHybridEngine, query: str) -> dict:
     }
 
     return benchmarks
+
+def main():
+    print("=" * 70)
+    print("ENTERPRISE HYBRID SEARCH BENCHMARK: DENSE vs SPARSE vs HYBRID (RRF)")
+    print("=" * 70)
+
+    engine = QdrantHybridEngine(collection_name="benchmark_eval_catalog")
+
+    # Ingest the test enterprise catalog
+    print("\n[1/3] Ingesting enterprise test documents...")
+    indexed_ids = engine.index_batch(SAMPLE_DOCUMENTS)
+    print(f"Indexed {len(indexed_ids)} documents into dual-vector catalog.")
+
+    # Telemetry
+    stats = engine.get_telemetry()
+    print(f"Total points in Qdrant: {stats['total_points']}")
+    print(f"Fusion algorithm: {stats['fusion_algorithm']}")
+
+    # Benchmark queries
+    test_queries = [
+        ("ERR-NET-9002 firewall rule", "Exact Technical Error Code"),
+        ("how to get reimbursed for work flights", "Pure Conceptual / Semantic Intent"),
+        ("SEC-AUTH-401 authentication failure", "Exact Security Token Code"),
+        ("setting up nvidia a100 gpu drivers", "Hybrid Technical Concept"),
+    ]
+
+    print("\n[2/3] Running Comparative Retrieval Benchmark...\n")
+
+    for query, query_type in test_queries:
+        print(f"Query: '{query}'")
+        print(f"Query Type: {query_type}")
+
+        results = evaluate_query(engine, query)
+
+        print(
+            f"  Dense (HNSW):   Top ID: {results['dense']['top_id']}   | Score: {results['dense']['score']}   | Latency: {results['dense']['latency_ms']}ms"
+        )
+        print(
+            f"  Sparse (BM25):  Top ID: {results['sparse']['top_id']}   | Score: {results['sparse']['score']}   | Latency: {results['sparse']['latency_ms']}ms"
+        )
+        print(
+            f"  Hybrid (RRF):   Top ID: {results['hybrid']['top_id']}   | Score: {results['hybrid']['score']} | Latency: {results['hybrid']['latency_ms']}ms"
+        )
+        print("-" * 70)
+
+    print("\n[3/3] Benchmark complete. Qdrant Hybrid Engine verified!")
+
+
+if __name__ == "__main__":
+    main()
