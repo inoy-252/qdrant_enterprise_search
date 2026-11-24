@@ -1,3 +1,4 @@
 qdrant-client
 google-genai
 python-dotenv
+pytest>=8.0.0
