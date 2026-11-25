@@ -1,5 +1,7 @@
 # Qdrant Enterprise Vector Search & Caching Engine
 
+[![CI Pipeline](https://github.com/inoy-252/qdrant_enterprise_search/actions/workflows/ci.yml/badge.svg)](https://github.com/inoy-252/qdrant_enterprise_search/actions/workflows/ci.yml)
+
 High-performance semantic vector retrieval and caching engine leveraging Qdrant and Google Gemini dense embeddings.
 
 ---
@@ -26,6 +28,12 @@ Traditional relational databases and linear SQLite scans degrade to $O(N)$ laten
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
+### Running Automated Tests
+
+Execute the hermetic, offline test suite with `pytest`:
+```bash
+pytest -v
 ```
 
 ### Environment Configuration
